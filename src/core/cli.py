@@ -471,6 +471,10 @@ class InteractiveDebugger8051:
             "  ports | p              Muestra el estado de P0, P1, P2 y P3 desde ADM\n"
             "  stack                  Muestra la pila desde 0x08 hasta SP\n"
             "  ram <inicio> <fin>     Inspecciona un rango de RAM interna (ej. ram 00 1F)\n"
+            "  paste [--fix]          Pega código Intel HEX directo en ROM y reinicia CPU\n"
+            "  load <archivo.hex>     Carga un archivo .hex en ROM y reinicia CPU\n"
+            "  paste [--fix]          Pega código Intel HEX directo en ROM y reinicia CPU\n"
+            "  load <archivo.hex>     Carga un archivo .hex en ROM y reinicia CPU\n"
             "  reset                  Reinicia la CPU y actualiza la capa ADM\n"
             "  help | h               Muestra esta ayuda\n"
             "  quit | q               Cierra la sesión y libera memoria compartida"
@@ -515,11 +519,78 @@ class InteractiveDebugger8051:
                 self.cmd_reset()
             elif cmd in ("help", "h", "?"):
                 self.print_help()
+            if cmd == "paste":
+                import tempfile
+                fix_cs = "--fix" in parts[1:]
+                contenido_hex = _leer_hex_desde_stdin(fix_checksum=fix_cs)
+                if contenido_hex.strip():
+                    with tempfile.NamedTemporaryFile("w", suffix=".hex", delete=False, encoding="utf-8") as tmp:
+                        tmp.write(contenido_hex)
+                        tmp_path = Path(tmp.name)
+                    try:
+                        cpu.reset()
+                        n_bytes = cpu.memory.load_hex(tmp_path)
+                        print(f"[ROM] Cargados {n_bytes} bytes y CPU reiniciada en 0x0000.")
+                    except ValueError as exc:
+                        print(f"[ERROR DE CARGA] {exc}")
+                    finally:
+                        tmp_path.unlink(missing_ok=True)
+                continue
+
+            if cmd == "load":
+                if len(parts) < 2:
+                    print("Uso: load <ruta_archivo.hex>")
+                    continue
+                ruta_hex = Path(parts[1])
+                try:
+                    cpu.reset()
+                    n_bytes = cpu.memory.load_hex(ruta_hex)
+                    print(f"[ROM] Cargados {n_bytes} bytes desde {ruta_hex} y CPU reiniciada.")
+                except (FileNotFoundError, ValueError) as exc:
+                    print(f"[ERROR DE CARGA] {exc}")
+                continue
+
             elif cmd in ("quit", "q", "exit"):
                 print("Finalizando emulación y liberando recursos ADM...")
                 break
             else:
                 print(f"Comando desconocido: '{cmd}'. Escriba 'help' para listar opciones.")
+
+
+
+def _recalcular_checksum_linea_hex(linea: str) -> str:
+    """Recalcula y corrige el último byte (checksum) de una línea Intel HEX."""
+    s = linea.strip()
+    if not s.startswith(":") or len(s) < 11:
+        return s
+    cuerpo = s[1:-2]
+    try:
+        datos = bytes.fromhex(cuerpo)
+    except ValueError:
+        return s
+    csum = (-sum(datos)) & 0xFF
+    return f":{cuerpo.upper()}{csum:02X}"
+
+
+def _leer_hex_desde_stdin(fix_checksum: bool = False) -> str:
+    """Lee líneas Intel HEX pegadas en consola hasta :00000001FF o línea vacía."""
+    print("Pega las líneas Intel HEX abajo (termina automáticamente al detectar :00000001FF o con Enter vacío):")
+    lineas: list[str] = []
+    while True:
+        try:
+            linea = input().strip()
+        except EOFError:
+            break
+        if not linea:
+            if lineas:
+                break
+            continue
+        if fix_checksum and linea.startswith(":") and linea.upper() != ":00000001FF":
+            linea = _recalcular_checksum_linea_hex(linea)
+        lineas.append(linea)
+        if linea.upper() == ":00000001FF":
+            break
+    return "\n".join(lineas) + "\n"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -530,6 +601,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     prog_group = parser.add_mutually_exclusive_group(required=False)
+    prog_group.add_argument(
+        "--paste",
+        action="store_true",
+        help="Permite pegar código Intel HEX directamente en consola sin crear archivo.",
+    )
     prog_group.add_argument(
         "--hex",
         type=Path,
@@ -543,6 +619,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ruta al archivo binario crudo (.bin) para cargar en ROM.",
     )
 
+    parser.add_argument(
+        "--fix-checksum",
+        action="store_true",
+        help="Recalcula automáticamente el checksum de las líneas Intel HEX pegadas.",
+    )
     parser.add_argument(
         "--base-addr",
         type=lambda x: int(x, 0),
@@ -594,6 +675,48 @@ def main(argv: Sequence[str] | None = None) -> int:
         cpu.reset()
 
         try:
+            if getattr(args, "paste", False):
+                import tempfile
+                contenido_hex = _leer_hex_desde_stdin(fix_checksum=getattr(args, "fix_checksum", False))
+                if not contenido_hex.strip():
+                    print("[AVISO] No se ingresaron líneas Intel HEX.", file=sys.stderr)
+                    adm.close()
+                    return 1
+                with tempfile.NamedTemporaryFile("w", suffix=".hex", delete=False, encoding="utf-8") as tmp:
+                    tmp.write(contenido_hex)
+                    tmp_path = Path(tmp.name)
+                try:
+                    cpu.reset()
+                    bytes_cargados = memoria.load_hex(tmp_path)
+                    print(f"[ROM] Cargados {bytes_cargados} bytes desde entrada directa (--paste).")
+                except (FileNotFoundError, ValueError) as exc:
+                    print(f"[ERROR DE CARGA] {exc}", file=sys.stderr)
+                    adm.close()
+                    return 1
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+
+            if getattr(args, "paste", False):
+                import tempfile
+                contenido_hex = _leer_hex_desde_stdin(fix_checksum=getattr(args, "fix_checksum", False))
+                if not contenido_hex.strip():
+                    print("[AVISO] No se ingresaron líneas Intel HEX.", file=sys.stderr)
+                    adm.close()
+                    return 1
+                with tempfile.NamedTemporaryFile("w", suffix=".hex", delete=False, encoding="utf-8") as tmp:
+                    tmp.write(contenido_hex)
+                    tmp_path = Path(tmp.name)
+                try:
+                    cpu.reset()
+                    bytes_cargados = memoria.load_hex(tmp_path)
+                    print(f"[ROM] Cargados {bytes_cargados} bytes desde entrada directa (--paste).")
+                except (FileNotFoundError, ValueError) as exc:
+                    print(f"[ERROR DE CARGA] {exc}", file=sys.stderr)
+                    adm.close()
+                    return 1
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+
             if args.hex is not None:
                 cargados = memoria.load_hex(args.hex)
                 print(f"[ROM] Cargados {cargados} bytes desde Intel HEX: {args.hex}")
