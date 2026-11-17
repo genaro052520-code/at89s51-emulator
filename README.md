@@ -112,3 +112,17 @@ flowchart LR
 ```bash
 pytest -v
 ```
+---
+
+## 4. Pruebas y Validación
+
+El proyecto incluye una suite de pruebas automatizadas con **pytest** organizadas en tres niveles de verificación y programas reales en formato **Intel HEX** listos para ejecutar.
+
+### Ejecución de la Suite de Pruebas (`pytest`)
+
+Con el entorno virtual activado en la raíz del proyecto, ejecuta:
+
+```bash
+pytest -v
+pytest -v
+q
