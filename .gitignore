@@ -47,3 +47,5 @@ runtime_state/
 Thumbs.db
 Desktop.ini
 *~
+# Directorio de estado IPC de ADM
+.state/
