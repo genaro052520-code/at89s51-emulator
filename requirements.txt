@@ -1,0 +1,15 @@
+# ==============================================================================
+# Dependencias del Emulador AT89S51 (Atmel/Microchip 8051)
+# ==============================================================================
+# Nota arquitectónica:
+# El núcleo de emulación (core), la capa de memoria compartida (ports/ADM),
+# la interfaz CLI y la interfaz gráfica (gui) utilizan EXCLUSIVAMENTE módulos
+# de la biblioteca estándar de Python:
+#   - tkinter   (Interfaz gráfica DIP-40 y periféricos)
+#   - mmap      (Memoria compartida IPC entre núcleo y GUI)
+#   - json      (Serialización de estado, telemetría y snapshots)
+#   - argparse  (Interfaz de línea de comandos del núcleo)
+# ==============================================================================
+
+# Framework de pruebas unitarias, de integración y de sistema
+pytest>=8.0.0

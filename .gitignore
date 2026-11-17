@@ -1,0 +1,49 @@
+# Entornos virtuales de Python
+.venv/
+venv/
+env/
+ENV/
+
+# Caché y artefactos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Empaquetado y distribución
+build/
+dist/
+develop-eggs/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+# Pruebas y cobertura (pytest)
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Visual Studio Code (conservar configuraciones compartidas del equipo)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Archivos temporales de estado, memoria compartida e IPC del emulador
+runtime_state/
+*.shm
+*.mmap
+*.state.json
+*.lock
+*.tmp
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
