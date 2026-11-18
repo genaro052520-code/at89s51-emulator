@@ -1,128 +1,158 @@
-# Emulador Atmel/Microchip AT89S51 (Arquitectura 8051) en Python
+# Simulador de Microcontrolador Atmel/Microchip AT89S51 (MCS-51)
 
-Emulador modular del microcontrolador de 8 bits **Atmel/Microchip AT89S51** (familia MCS-51) implementado en Python puro, diseñado bajo una arquitectura desacoplada en capas para ejecución y depuración en **Visual Studio Code**.
-
----
-
-## 1. Arquitectura Harvard del AT89S51
-
-El AT89S51 implementa una **arquitectura Harvard** con espacios de direcciones físicamente separados para la memoria de programa (código) y la memoria de datos:
-
-* **Memoria de Programa (Flash ROM interna):**
-  * Capacidad de **4 KB** (`4096 bytes`), mapeada desde `0x0000` hasta `0x0FFF`.
-  * Almacena el firmware cargado desde archivos en formato **Intel HEX** (`.hex`).
-* **Memoria de Datos Interna (RAM):**
-  * Capacidad de **128 bytes** (`0x00` a `0x7F`), estructurada en tres regiones:
-    * `0x00` – `0x1F`: **4 bancos de registros** (`Bank 0` a `Bank 3`), cada uno con 8 registros de propósito general (`R0`–`R7`).
-    * `0x20` – `0x2F`: **16 bytes direccionables bit a bit** (128 bits individuales con direcciones `0x00`–`0x7F`).
-    * `0x30` – `0x7F`: **RAM de propósito general** y espacio de crecimiento ascendente de la pila (*Stack*).
-* **Registros Principales y SFRs (*Special Function Registers*, `0x80` – `0xFF`):**
-  * **`A` (`ACC`, `0xE0`):** Acumulador principal de 8 bits para operaciones de la ALU y transferencias de datos.
-  * **`B` (`0xF0`):** Registro auxiliar de 8 bits empleado en instrucciones de multiplicación (`MUL AB`) y división (`DIV AB`).
-  * **`PSW` (`0xD0`):** Palabra de estado del programa (*Program Status Word*), contiene las banderas `CY` (Carry), `AC` (Auxiliary Carry), `F0`, selector de banco `RS1:RS0`, `OV` (Overflow) y `P` (Paridad).
-  * **`SP` (`0x81`):** Puntero de pila de 8 bits (inicializado en `0x07` tras un reset).
-  * **`DPTR` (`DPL` en `0x82`, `DPH` en `0x83`):** Registro puntero de datos de 16 bits para direccionamiento indirecto de memoria externa o tablas en ROM (`MOVC`).
-  * **`PC` (16 bits):** Contador de programa (*Program Counter*), direcciona hasta 64 KB (`0x0000`–`0xFFFF`) y apunta a la siguiente instrucción a decodificar.
-* **Puertos Bidireccionales de E/S de 8 bits:**
-  * **`P0` (`0x80`):** Puerto 0 de 8 bits (drenador abierto en modo E/S; bus multiplexado de direcciones/datos bajos `AD0`–`AD7` en acceso externo).
-  * **`P1` (`0x90`):** Puerto 1 de 8 bits con resistencias *pull-up* internas (E/S de propósito general y líneas de programación ISP).
-  * **`P2` (`0xA0`):** Puerto 2 de 8 bits con *pull-up* internas (E/S o byte alto de direcciones `A8`–`A15`).
-  * **`P3` (`0xB0`):** Puerto 3 de 8 bits con *pull-up* internas y funciones alternativas (`RXD`, `TXD`, `INT0`, `INT1`, `T0`, `T1`, `WR`, `RD`).
+Emulador de arquitectura Harvard en Python 3 para el microcontrolador **Atmel/Microchip AT89S51 (familia 8051)** con ejecución desacoplada multi-proceso mediante memoria compartida `mmap` (**ADM**), depurador interactivo por consola (CLI) y un **laboratorio electrónico virtual estilo Tinkercad** en Tkinter con encapsulado DIP-40, protoboard interactiva, cableado dinámico y 10 componentes electrónicos.
 
 ---
 
-## 2. Arquitectura del Software y Desacoplamiento Estricto
+## Características Principales
 
-El sistema prohíbe cualquier importación o llamada directa entre el **Núcleo 8051 (`src/core`)** y la **Interfaz Gráfica (`src/gui`)**. Ambos subsistemas operan como procesos independientes sincronizados exclusivamente mediante la **Capa ADM (`src/ports`)**:
+* **Arquitectura Harvard MCS-51:**
+  * Memoria de programa (**ROM**) independiente direccionable desde `0x0000` hasta `0xFFFF` (4 KB internos del AT89S51 / expansión hasta 64 KB).
+  * Memoria de datos interna (**RAM**) de 128 bytes (`0x00`–`0x7F`) con 4 bancos de registros (`R0`–`R7`), área direccionable por bits (`0x20`–`0x2F`) y pila (`SP`).
+  * Registros de Funciones Especiales (**SFR**) mapeados en `0x80`–`0xFF`: `ACC`, `B`, `PSW`, `SP`, `DPL`, `DPH`, `P0`, `P1`, `P2`, `P3`, `TMOD`, `TCON`, `TH0`, `TL0`, `TH1`, `TL1`, `IE`, `IP`.
+* **Periféricos Internos del 8051:**
+  * Temporizadores/Contadores de 16 bits (`Timer 0` y `Timer 1`) en modos 0, 1 y 2.
+  * Sistema de interrupciones vectorizadas (`INT0`, `TF0`, `INT1`, `TF1`) con prioridades configurables.
+  * Actualización automática de banderas de estado en `PSW` (`CY`, `AC`, `F0`, `RS1`, `RS0`, `OV`, `P`).
+* **Desacoplamiento Estricto por Memoria Compartida (`ADM` + `mmap`):**
+  * El núcleo de emulación (`src/core/`) y la interfaz gráfica (`src/gui/`) se ejecutan como **procesos independientes** sincronizados a través de `.state/ports_state.bin`.
+  * La interfaz gráfica nunca importa módulos de `src/core/` ni `src/storage/`.
+* **Laboratorio Virtual Estilo Tinkercad (`src/gui/`):**
+  * Encapsulado físico **AT89S51 (DIP-40)** con los 40 pines interactivos, botón hardware `RESET (PIN 9)` y monitor hexadecimal/binario de `P0`–`P3`.
+  * **Protoboard** con buses de alimentación (`+5V` / `GND`), matriz de perforaciones (`a–e` y `f–j` × `30` columnas) con iluminación de nodos activos a `5V`, **cables virtuales curvados** (`smooth=True`), **Inspector de Propiedades en tiempo real** y **10 componentes electrónicos interactivos**.
 
-```mermaid
-flowchart LR
-    subgraph CORE_PROC["Proceso 1: Núcleo 8051 (CLI)"]
-        CLI["cli.py (argparse)"]
-        CPU["cpu.py / decoder.py / alu.py"]
-        STORAGE["storage/ (ROM 4KB, RAM 128B, SFRs)"]
-        CLI --> CPU
-        CPU <--> STORAGE
-    end
+---
 
-    subgraph IPC_LAYER["Capa Intermedia de Sincronización"]
-        ADM["ports/adm.py (Clase ADM)\nMemoria Compartida (mmap) + Estado (json)"]
-    end
+## Arquitectura y Estructura del Proyecto
 
-    subgraph GUI_PROC["Proceso 2: Interfaz Gráfica (GUI)"]
-        TK["gui/app.py (Tkinter)"]
-        DIP["gui/dip40_view.py (Encapsulado DIP-40)"]
-        PERIPH["gui/peripherals.py (LEDs / Botones)"]
-        TK <--> DIP
-        TK <--> PERIPH
-    end
-
-    CPU <-->|"Lectura/Escritura de Latches y Pines"| ADM
-    ADM <-->|"Sondeo de Pines y Estímulos Externos"| TK
+```text
++-----------------------------------+       +--------------------------------------+
+|       PROCESO CLI / NÚCLEO        |       |       PROCESO GUI (TINKERCAD)        |
+|                                   |       |                                      |
+|  src/core/cpu.py    (CPU8051)     |       |  src/gui/app.py (AT89S51EmulatorGUI) |
+|  src/core/memory.py (Memory8051)  |       |  src/gui/protoboard.py               |
+|  src/storage/       (Intel HEX)   |       |  src/gui/components/ (10 clases)     |
++-----------------+-----------------+       +------------------+-------------------+
+                  |                                            |
+                  |  Lectura/Escritura de Puertos (P0-P3, AN)  |
+                  +------------------>  ADM  <-----------------+
+                                 (src/ports/adm.py)
+                              mmap: .state/ports_state.bin
 ```
 
-### Reglas de Aislamiento
-1. **Cero acoplamiento directo:** `src/core` nunca importa `tkinter` ni módulos de `src/gui`; `src/gui` nunca importa `CPU8051`, `ProgramROM`, `InternalRAM` ni `SpecialFunctionRegisters`.
-2. **Contrato único en `ADM`:** Toda transferencia de estado de los puertos `P0`–`P3` y señales de control (`RST`, `XTAL`, `ALE`, `PSEN`, `EA`) pasa por la clase `ADM` respaldada por `mmap` y `json`.
-3. **Ejecución autónoma:** El núcleo puede correr en modo *headless* desde terminal o integrarse en pipelines de pruebas automatizadas sin abrir ventanas gráficas.
+```text
+at89s51-emulator/
+├── main.py                         # Punto de entrada del núcleo CPU y depurador CLI
+├── main_gui.py                     # Punto de entrada del laboratorio virtual (GUI Tkinter)
+├── README.md                       # Documentación técnica del proyecto
+├── examples/                       # Programas de prueba en código máquina Intel HEX (.hex)
+│   ├── blink_p1.hex                # Parpadeo de LEDs en el Puerto 1
+│   ├── binary_counter.hex          # Contador binario de 8 bits en P1
+│   └── button_to_led.hex           # Lectura de pulsador en P3.2 y salida en P1.0
+├── src/
+│   ├── core/                       # Núcleo de emulación del microcontrolador AT89S51
+│   │   ├── cpu.py                  # Ciclo fetch-decode-execute, ALU, Timers e Interrupciones
+│   │   └── memory.py               # Memoria Harvard (ROM, RAM interna y SFRs)
+│   ├── storage/                    # Persistencia y carga de firmware
+│   │   └── hex_loader.py           # Parser y validador de checksum para archivos Intel HEX
+│   ├── ports/                      # Capa intermedia de comunicación IPC
+│   │   └── adm.py                  # Administrador de Dispositivos y Memoria (mmap 40 canales)
+│   └── gui/                        # Interfaz gráfica estilo Tinkercad (desacoplada)
+│       ├── app.py                  # Ventana principal de 3 zonas e Inspector de Propiedades
+│       ├── protoboard.py           # Clases Protoboard y CableVirtual (enrutamiento dinámico)
+│       └── components/             # Biblioteca de 10 componentes electrónicos virtuales
+│           ├── __init__.py         # Exportación y catálogos de actuadores y sensores
+│           ├── base.py             # Clase abstracta ComponenteElectronico
+│           ├── actuadores.py       # LED, Motor DC, Servomotor, Buzzer y Display 7-Seg
+│           └── sensores.py         # Pulsador, Switch DIP, Potenciómetro, Temp y HC-SR04
+└── tests/                          # Suite de pruebas automatizadas con pytest
+    └── test_components_gui.py      # Pruebas de integración ADM, 10 componentes y AST GUI
+```
 
 ---
 
-## 3. Instalación y Ejecución en Visual Studio Code
+## Mapa de Canales y Señales en `ADM`
 
-### Requisitos Previos
-* **Python 3.10** o superior.
-* Soporte para **Tkinter** instalado en el sistema operativo (incluido por defecto en Windows; en distribuciones basadas en Debian/Ubuntu/Linux Mint instalar mediante `sudo apt install python3-tk`).
-* **Visual Studio Code** con la extensión oficial de **Python** (`ms-python.python`).
+`ADM` (`src/ports/adm.py`) administra **40 canales** sincronizados en memoria compartida con umbral lógico TTL de **`2.5 V`** (`0.0 V` = nivel bajo `0`, `5.0 V` = nivel alto `1`):
 
-### Configuración del Entorno
-1. Clonar el repositorio y abrir la carpeta en VS Code:
-   ```bash
-   git clone <URL_DEL_REPOSITORIO>
-   cd at89s51-emulator
-   code .
-   ```
-2. Crear y activar el entorno virtual (`.venv`):
-   * **Linux / macOS:**
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
-   * **Windows (PowerShell):**
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
-3. Seleccionar el intérprete `.venv` en VS Code (`Ctrl + Shift + P` -> `Python: Select Interpreter`) e instalar `pytest`:
-   ```bash
-   pip install -r requirements.txt
-   ```
+| Rango de Canales | Puerto / Bus | Pines Físicos DIP-40 | Descripción |
+| :--- | :--- | :--- | :--- |
+| `0` – `7` | `P0.0` – `P0.7` | Pines `39` – `32` | Puerto 0 bidireccional / bus multiplexado `AD0–AD7` |
+| `8` – `15` | `P1.0` – `P1.7` | Pines `1` – `8` | Puerto 1 de E/S de propósito general con pull-up interno |
+| `16` – `23` | `P2.0` – `P2.7` | Pines `21` – `28` | Puerto 2 de E/S / byte alto de direcciones `A8–A15` |
+| `24` – `31` | `P3.0` – `P3.7` | Pines `10` – `17` | Puerto 3 de E/S y funciones especiales (`RXD`, `TXD`, `INT0`, `INT1`, `T0`, `T1`, `WR`, `RD`) |
+| `32` – `39` | `AN0` – `AN7` | Bus Analógico Auxiliar | Canales continuos (`0.0 V` a `5.0 V`) para sensores analógicos y potenciómetros |
 
-### Ejecución Desacoplada (Dos Terminales en VS Code)
-* **Terminal 1 — Iniciar el Núcleo 8051 (CLI):**
+---
+
+## Componentes Electrónicos del Laboratorio Virtual (`src/gui/components/`)
+
+### Actuadores de Salida (5)
+1. **`LedComponente`**: Diodo emisor de luz (`rojo`, `verde`, `azul`, `amarillo`, `naranja`, `blanco`) con resistencia limitadora y halo luminoso cuando el pin supera `2.5 V`.
+2. **`MotorDCComponente`**: Motor de corriente continua con animación continua de rotación del rotor (`girando`/`activo` y `angulo`).
+3. **`ServomotorComponente`**: Servomotor posicional (`0°` a `180°`) con interpolación suave del brazo actuador.
+4. **`BuzzerComponente`**: Zumbador piezoeléctrico activo con ondas acústicas animadas al recibir nivel lógico alto.
+5. **`Display7SegmentosComponente`**: Display de 7 segmentos conectado a un puerto completo de 8 bits o nibble (`digito`, `valor_byte`, `segmentos` `a–g` y `dp`).
+
+### Sensores y Entradas Interactivas (5)
+6. **`PulsadorComponente`**: Botón táctil momentáneo de 4 patas; al mantenerlo presionado inyecta estímulo en `ADM` (`inyectar_estimulo_externo`) y al soltarlo lo libera (`liberar_estimulo_externo`).
+7. **`InterruptorDipComponente`**: Interruptor deslizante de 2 posiciones (`ON`/`OFF`) con enclavamiento de estado en `ADM`.
+8. **`PotenciometroComponente`**: Perilla rotatoria y barra deslizante (`0%` a `100%`) que escribe voltaje continuo (`0.0 V` – `5.0 V`) en `AN0–AN7` y refleja nivel lógico en un pin digital si supera `2.5 V`.
+9. **`SensorTemperaturaComponente`**: Sensor térmico tipo LM35/DHT (`0 °C` a `100 °C`) con salida analógica lineal proporcional y disparo digital alto al superar un umbral configurable (`30 °C` por defecto).
+10. **`SensorUltrasonicoComponente`**: Sensor de distancia tipo HC-SR04 (`2 cm` a `400 cm`) con deslizador de objetivo y activación de señal digital de obstáculo cuando la distancia es menor a `20 cm`.
+
+---
+
+## Instalación y Requisitos
+
+* **Python:** `3.10` o superior.
+* **Tkinter:** Incluido en instalaciones estándar de Python. En distribuciones Debian/Ubuntu/Linux Mint, instalar si no está presente:
   ```bash
-  python -m src.core.cli --hex firmware_examples/blink_p1.hex
+  sudo apt update && sudo apt install -y python3-tk
   ```
-* **Terminal 2 — Iniciar la Interfaz Gráfica DIP-40 (GUI):**
+* **Pytest** (para ejecutar las pruebas unitarias e integración):
   ```bash
-  python -m src.gui.app
+  pip install pytest
   ```
 
-### Ejecución de Pruebas con `pytest`
+---
+
+## Guía de Ejecución
+
+### 1. Ejecución Multi-Proceso (Laboratorio Visual + Núcleo AT89S51)
+
+Abre **dos terminales** en la raíz del proyecto para observar la comunicación IPC en tiempo real:
+
+**Terminal 1 — Iniciar el Laboratorio Virtual (GUI):**
+```bash
+python main_gui.py
+```
+*(Opcional: puedes especificar un archivo de estado compartido personalizado con `--state-file ruta/archivo.bin`.)*
+
+**Terminal 2 — Ejecutar un firmware Intel HEX en el núcleo AT89S51:**
+```bash
+python main.py examples/blink_p1.hex
+```
+
+### 2. Controles del Laboratorio Virtual (`main_gui.py`)
+
+* **Agregar componentes:** Selecciona el pin destino (`P0.0`–`P3.7`), fila/columna de la protoboard y haz clic sobre cualquiera de los 10 botones de la paleta derecha.
+* **Circuitos de demostración (1 clic):** Carga configuraciones prearmadas (`Actuadores en P1`, `Botón P3.2 -> LED P1.0` o `Sensores + Display 7-Seg`).
+* **Inspección y reconexión en vivo:** Haz clic sobre cualquier componente en la protoboard para ver sus propiedades en tiempo real en el **Panel Inspector** o cambiar dinámicamente el pin del AT89S51 al que está conectado.
+* **Reset hardware:** Mantén presionado **`RESET HARDWARE (PIN 9 RST)`** en el panel izquierdo para restaurar todos los puertos a `0xFF`.
+
+---
+
+## Pruebas Automatizadas
+
+Ejecuta la suite completa de pruebas desde la raíz del repositorio:
+
 ```bash
 pytest -v
 ```
----
 
-## 4. Pruebas y Validación
-
-El proyecto incluye una suite de pruebas automatizadas con **pytest** organizadas en tres niveles de verificación y programas reales en formato **Intel HEX** listos para ejecutar.
-
-### Ejecución de la Suite de Pruebas (`pytest`)
-
-Con el entorno virtual activado en la raíz del proyecto, ejecuta:
-
-```bash
-pytest -v
-pytest -v
-q
+La suite en `tests/test_components_gui.py` verifica:
+* La existencia e inicialización de las **10 clases de componentes** en `src/gui/components/`.
+* La sincronización bidireccional **`CPU8051` ↔ `ADM` ↔ Componentes** (escritura en `P1`/`P2` hacia actuadores y lectura en `P2`/`P3` desde sensores y pulsadores) en modo headless sin necesidad de servidor gráfico.
+* El enrutamiento dinámico de **`Protoboard`** y **`CableVirtual`** sobre pines digitales (`P0.0`–`P3.7`) y canales analógicos (`AN0`–`AN7`).
+* Una **auditoría estática mediante AST** que confirma que ningún archivo dentro de `src/gui/` importa módulos de `src/core` ni `src/storage`.
